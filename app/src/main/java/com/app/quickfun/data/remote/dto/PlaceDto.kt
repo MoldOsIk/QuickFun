@@ -7,6 +7,7 @@ data class PlaceDto(
     val id: String,
     val name: String,
     val description: String? = null,
+    val status: String? = null,
     val categories: CategoryDto? = null,
     val locations: LocationDto? = null
 )

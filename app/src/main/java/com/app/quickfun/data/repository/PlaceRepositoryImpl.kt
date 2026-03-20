@@ -24,7 +24,11 @@ class PlaceRepositoryImpl : PlaceRepository {
                     locations:location_id(address, city)
                     """
                 )
-            )
+            ) {
+                filter {
+                    eq("status", "approved")
+                }
+            }
             .decodeList<PlaceDto>()
             .map { it.toDomain() }
     }

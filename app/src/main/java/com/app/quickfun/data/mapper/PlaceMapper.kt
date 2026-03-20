@@ -8,6 +8,7 @@ fun PlaceDto.toDomain(): Place {
         id = id,
         name = name,
         description = description,
+        status = status,
         categoryName = categories?.name,
         city = locations?.city,
         address = locations?.address

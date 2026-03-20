@@ -7,6 +7,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import com.app.quickfun.domain.model.Place
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 class PlaceViewModel(
     private val getPlacesUseCase: GetPlacesUseCase
@@ -22,7 +24,9 @@ class PlaceViewModel(
     fun loadPlaces() {
         viewModelScope.launch {
             try {
-                _places.value = getPlacesUseCase()
+                _places.value = withContext(Dispatchers.IO) {
+                    getPlacesUseCase()
+                }
             } catch (e: Exception) {
                 e.printStackTrace()
             }
