@@ -21,4 +21,6 @@ dependencyResolutionManagement {
 
 rootProject.name = "QuickFun"
 include(":app")
+include(":domain")
+include(":data")
  
