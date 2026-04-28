@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.app.quickfun.domain.usecase.CheckAuthUseCase
 import com.app.quickfun.domain.usecase.RegisterPlaceAsOwnerUseCase
 import com.app.quickfun.domain.usecase.SaveProfileNameUseCase
+import com.app.quickfun.domain.usecase.SaveProfilePhoneUseCase
 import com.app.quickfun.domain.usecase.SignInUseCase
 import com.app.quickfun.domain.usecase.SignOutUseCase
 import com.app.quickfun.domain.usecase.SignUpUseCase
@@ -27,6 +28,7 @@ class AuthViewModel(
     private val signUpUseCase: SignUpUseCase,
     private val checkAuth: CheckAuthUseCase,
     private val saveProfileNameUseCase: SaveProfileNameUseCase,
+    private val saveProfilePhoneUseCase: SaveProfilePhoneUseCase,
     private val registerPlaceAsOwnerUseCase: RegisterPlaceAsOwnerUseCase,
     private val signOutUseCase: SignOutUseCase
 ) : ViewModel() {
@@ -53,7 +55,8 @@ class AuthViewModel(
                 event.email,
                 event.password,
                 event.displayName,
-                event.mode
+                event.mode,
+                event.phoneE164
             )
             AuthIntent.DismissEmailConfirmation -> dismissEmailConfirmation()
             AuthIntent.BackToUnauthorized -> _state.value = AuthState.Unauthorized
@@ -113,7 +116,8 @@ class AuthViewModel(
         email: String,
         password: String,
         displayName: String,
-        mode: RegistrationMode
+        mode: RegistrationMode,
+        phoneE164: String?
     ) {
         viewModelScope.launch {
             if (email.isBlank() || password.isBlank()) {
@@ -130,12 +134,25 @@ class AuthViewModel(
             _state.value = AuthState.Loading
             try {
                 val result = withContext(Dispatchers.IO) {
-                    signUpUseCase(email, password, displayName.ifBlank { null })
+                    signUpUseCase(
+                        email,
+                        password,
+                        displayName.ifBlank { null },
+                        phoneE164?.trim()?.takeIf { it.isNotEmpty() }
+                    )
                 }
                 if (result.sessionActive) {
                     val name = displayName.trim()
                     if (name.isNotEmpty()) {
                         withContext(Dispatchers.IO) { saveProfileNameUseCase(name) }
+                    }
+                    val phone = phoneE164?.trim()?.takeIf { it.isNotEmpty() }
+                    if (phone != null) {
+                        try {
+                            withContext(Dispatchers.IO) { saveProfilePhoneUseCase(phone) }
+                        } catch (e: Exception) {
+                            Log.e(TAG, "saveProfilePhone after signUp failed", e)
+                        }
                     }
                     if (mode is RegistrationMode.PlaceOwner) {
                         try {

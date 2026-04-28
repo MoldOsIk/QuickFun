@@ -9,6 +9,8 @@ import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material3.Badge
+import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
@@ -23,20 +25,24 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
+import kotlinx.coroutines.delay
 import com.app.quickfun.ui.place.BookingPlaceDialog
 import com.app.quickfun.ui.place.ModerationTab
 import com.app.quickfun.ui.place.MyVenueTab
 import com.app.quickfun.ui.place.PlaceCatalogTab
 import com.app.quickfun.ui.place.PlaceMapTab
+import com.app.quickfun.ui.place.PlaceReviewsBottomSheet
 import com.app.quickfun.ui.place.PlaceViewModel
 import com.app.quickfun.ui.place.model.PlaceEffect
 import com.app.quickfun.ui.place.model.PlaceIntent
 import com.app.quickfun.ui.profile.ProfileScreen
 import com.app.quickfun.ui.profile.ProfileViewModel
+import com.app.quickfun.ui.profile.model.ProfileIntent
 
 private enum class MainTab {
     Catalog,
@@ -54,8 +60,13 @@ fun MainShell(
     onSignOut: () -> Unit
 ) {
     val profile by profileVm.state.collectAsState()
+    val placeState by placeVm.state.collectAsState()
     val snackbarHostState = remember { SnackbarHostState() }
     var selectedTab by remember { mutableIntStateOf(0) }
+    /** После закрытия диалога брони обновляем профиль (список «Мои брони»). */
+    var hadBookingDialogOpen by remember { mutableStateOf(false) }
+    /** Чтобы не удерживать пользователя на «Карте», если pending уже отработал переключением вкладки. */
+    var lastAutoSwitchedMapForPendingId by remember { mutableStateOf<String?>(null) }
 
     val isSuperAdmin = !profile.isLoading &&
         profile.roles.any { it.equals("admin", ignoreCase = true) }
@@ -78,16 +89,52 @@ fun MainShell(
 
     val currentTab = tabs.getOrElse(selectedTab) { MainTab.Catalog }
 
+    LaunchedEffect(placeState.pendingMapFocusPlaceId, tabs) {
+        val pendingId = placeState.pendingMapFocusPlaceId
+        if (pendingId == null) {
+            lastAutoSwitchedMapForPendingId = null
+            return@LaunchedEffect
+        }
+        if (pendingId == lastAutoSwitchedMapForPendingId) return@LaunchedEffect
+        lastAutoSwitchedMapForPendingId = pendingId
+        val mapIndex = tabs.indexOf(MainTab.Map)
+        if (mapIndex >= 0) selectedTab = mapIndex
+    }
+
     LaunchedEffect(currentTab, isSuperAdmin) {
         if (currentTab == MainTab.Moderation && isSuperAdmin) {
             placeVm.obtainEvent(PlaceIntent.LoadModeration)
         }
     }
 
-    LaunchedEffect(currentTab, isPlaceAdmin) {
-        if (currentTab == MainTab.MyVenue && isPlaceAdmin) {
-            placeVm.obtainEvent(PlaceIntent.LoadMyPlaces)
+    /** Счётчик заявок на боттом-баре: первая загрузка и периодическое обновление без захода на «Модерация». */
+    LaunchedEffect(isSuperAdmin, profile.isLoading) {
+        if (!isSuperAdmin || profile.isLoading) return@LaunchedEffect
+        while (true) {
+            placeVm.obtainEvent(PlaceIntent.LoadModeration)
+            delay(45_000L)
         }
+    }
+
+    /**
+     * Пока открыта «Моё», периодически обновляем список заведений.
+     * Тогда при одобрении/отклонении модератором срабатывает сравнение в [PlaceViewModel.reloadMyPlaces]
+     * и snackbar показывается прямо на этой вкладке, без ручного обновления.
+     */
+    LaunchedEffect(currentTab, isPlaceAdmin, profile.isLoading) {
+        if (currentTab != MainTab.MyVenue || !isPlaceAdmin || profile.isLoading) return@LaunchedEffect
+        while (true) {
+            placeVm.obtainEvent(PlaceIntent.LoadMyPlaces)
+            delay(45_000L)
+        }
+    }
+
+    LaunchedEffect(placeState.bookingPlace) {
+        val open = placeState.bookingPlace != null
+        if (hadBookingDialogOpen && !open) {
+            profileVm.obtainEvent(ProfileIntent.Refresh)
+        }
+        hadBookingDialogOpen = open
     }
 
     LaunchedEffect(currentTab) {
@@ -137,7 +184,27 @@ fun MainShell(
                     NavigationBarItem(
                         selected = selectedTab == index,
                         onClick = { selectedTab = index },
-                        icon = { Icon(icon, contentDescription = label) },
+                        icon = {
+                            if (tab == MainTab.Moderation && isSuperAdmin) {
+                                val pending = placeState.pendingPlaces.size
+                                BadgedBox(
+                                    badge = {
+                                        if (pending > 0) {
+                                            Badge {
+                                                Text(
+                                                    if (pending > 9) "9+"
+                                                    else pending.toString()
+                                                )
+                                            }
+                                        }
+                                    }
+                                ) {
+                                    Icon(icon, contentDescription = label)
+                                }
+                            } else {
+                                Icon(icon, contentDescription = label)
+                            }
+                        },
                         label = { Text(label) }
                     )
                 }
@@ -169,9 +236,11 @@ fun MainShell(
                 )
             }
 
-            val placeState by placeVm.state.collectAsState()
             if (placeState.bookingPlace != null) {
                 BookingPlaceDialog(placeVm = placeVm)
+            }
+            if (placeState.reviewsPlaceId != null) {
+                PlaceReviewsBottomSheet(placeVm = placeVm, profile = profile)
             }
         }
     }

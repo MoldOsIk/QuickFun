@@ -26,6 +26,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.clickable
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextOverflow
@@ -34,6 +35,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.app.quickfun.domain.model.Place
+import com.app.quickfun.domain.model.displayVenueTypeRu
 
 /** Только обложка (для списков и краткого просмотра на карте). */
 @Composable
@@ -77,7 +79,9 @@ fun PlaceVenueFullDetailContent(
     place: Place,
     modifier: Modifier = Modifier,
     heroHeight: Dp = 180.dp,
-    galleryThumbSize: Dp = 96.dp
+    galleryThumbSize: Dp = 96.dp,
+    /** Например: переключение на встроенную карту и приближение к точке. */
+    onOpenInAppMap: (() -> Unit)? = null
 ) {
     Column(modifier = modifier) {
         PlaceVenuePhotosReadOnly(
@@ -92,14 +96,12 @@ fun PlaceVenueFullDetailContent(
             maxLines = 3,
             overflow = TextOverflow.Ellipsis
         )
-        place.categoryName?.takeIf { it.isNotBlank() }?.let { cat ->
-            Text(
-                text = cat,
-                style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.padding(top = 4.dp)
-            )
-        }
+        Text(
+            text = place.displayVenueTypeRu(),
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.padding(top = 4.dp)
+        )
         Spacer(Modifier.height(12.dp))
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
         Spacer(Modifier.height(12.dp))
@@ -109,6 +111,16 @@ fun PlaceVenueFullDetailContent(
             lineHeight = 22.sp
         )
         Spacer(Modifier.height(12.dp))
+        val formattedAddress = listOfNotNull(
+            place.city?.takeIf { it.isNotBlank() },
+            place.address?.takeIf { it.isNotBlank() }
+        ).joinToString(", ").trim()
+        val addressText = when {
+            formattedAddress.isNotEmpty() -> formattedAddress
+            place.latitude != null && place.longitude != null -> "Показать на карте приложения"
+            else -> "Адрес не указан"
+        }
+        val inAppMapClick = onOpenInAppMap?.takeIf { canFocusPlaceOnInAppMap(place) }
         Row(verticalAlignment = Alignment.Top) {
             Icon(
                 Icons.Filled.LocationOn,
@@ -120,12 +132,21 @@ fun PlaceVenueFullDetailContent(
             )
             Spacer(Modifier.width(8.dp))
             Text(
-                text = listOfNotNull(
-                    place.city?.takeIf { it.isNotBlank() },
-                    place.address?.takeIf { it.isNotBlank() }
-                ).joinToString(", ").ifBlank { "Адрес не указан" },
+                text = addressText,
                 style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+                color = if (inAppMapClick != null) {
+                    MaterialTheme.colorScheme.primary
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                },
+                modifier = Modifier
+                    .then(
+                        if (inAppMapClick != null) {
+                            Modifier.clickable(onClick = inAppMapClick)
+                        } else {
+                            Modifier
+                        }
+                    )
             )
         }
         val lat = place.latitude

@@ -34,7 +34,7 @@ class GenerateVenueSeatLayoutUseCase(
                 buildList {
                     for (r in 1..config.rows) {
                         for (s in 1..config.seatsPerRow) {
-                            add(Triple(r, s, "Ряд $r · место $s"))
+                            add(Triple(r, s, "$r.$s"))
                         }
                     }
                 }

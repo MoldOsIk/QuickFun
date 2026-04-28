@@ -49,4 +49,26 @@ fun Place.resolveVenueKind(): VenueKind {
     return venueKindFromCategoryName(categoryName)
 }
 
+/** Короткое русское название типа для каталога и карты. */
+fun VenueKind.ruShortType(): String =
+    when (this) {
+        VenueKind.CINEMA -> "Кино"
+        VenueKind.BOWLING -> "Боулинг"
+        VenueKind.BILLIARDS -> "Бильярд"
+        VenueKind.KARAOKE -> "Караоке"
+        VenueKind.GENERIC -> "Другое"
+    }
+
+/**
+ * Строка «тип» для UI: по [resolveVenueKind] — по-русски; для GENERIC — сырое имя категории из БД, если есть.
+ */
+fun Place.displayVenueTypeRu(): String {
+    val kind = resolveVenueKind()
+    return if (kind != VenueKind.GENERIC) {
+        kind.ruShortType()
+    } else {
+        categoryName?.trim()?.takeIf { it.isNotEmpty() } ?: "—"
+    }
+}
+
 private fun String.anyKeyword(vararg keys: String): Boolean = keys.any { contains(it) }

@@ -9,8 +9,10 @@ class AddSeatUseCase(
         placeId: String,
         rowNumber: Int,
         seatNumber: Int,
-        label: String? = null
+        label: String? = null,
+        layoutX: Int? = null,
+        layoutY: Int? = null
     ) {
-        bookingRepository.insertSeat(placeId, rowNumber, seatNumber, label)
+        bookingRepository.insertSeat(placeId, rowNumber, seatNumber, label, layoutX, layoutY)
     }
 }

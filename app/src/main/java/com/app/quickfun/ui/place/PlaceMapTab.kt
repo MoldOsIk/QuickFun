@@ -10,6 +10,7 @@ import android.location.LocationManager
 import android.view.ViewGroup
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -61,6 +62,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import com.app.quickfun.BuildConfig
 import com.app.quickfun.domain.model.Place
+import com.app.quickfun.domain.model.displayVenueTypeRu
 import com.app.quickfun.map.resolveMapPinCoordinates
 import com.app.quickfun.ui.place.model.PlaceIntent
 import com.yandex.mapkit.Animation
@@ -173,6 +175,8 @@ fun PlaceMapTab(placeVm: PlaceViewModel) {
 
     var selectedPlace by remember { mutableStateOf<Place?>(null) }
     var mapSheetExpanded by remember { mutableStateOf(false) }
+    /** После перехода с каталога по адресу не откатывать камеру в «все метки». */
+    var suppressAutoFitAllPins by remember { mutableStateOf(false) }
 
     LaunchedEffect(selectedPlace?.id) {
         mapSheetExpanded = false
@@ -363,11 +367,47 @@ fun PlaceMapTab(placeVm: PlaceViewModel) {
     }
 
     // Сначала все заведения в кадр; иначе при включённом GPS карта смотрит на «меня», а метки в других городах не видны.
-    LaunchedEffect(mapView, placesWithPins) {
+    LaunchedEffect(mapView, placesWithPins, placeState.pendingMapFocusPlaceId, suppressAutoFitAllPins) {
         val map = mapView.mapWindow.map
         if (placesWithPins.isEmpty()) return@LaunchedEffect
+        if (placeState.pendingMapFocusPlaceId != null) return@LaunchedEffect
+        if (suppressAutoFitAllPins) return@LaunchedEffect
         val cp = cameraPositionForAllPins(map, placesWithPins) ?: return@LaunchedEffect
         map.move(cp, Animation(Animation.Type.SMOOTH, 0.45f), null)
+    }
+
+    LaunchedEffect(
+        placeState.pendingMapFocusPlaceId,
+        placesWithPins,
+        mapPlaces,
+        placeState.isLoading,
+        mapView
+    ) {
+        val id = placeState.pendingMapFocusPlaceId ?: return@LaunchedEffect
+        val triple = placesWithPins.find { it.first.id == id }
+        if (triple != null) {
+            val map = mapView.mapWindow.map
+            val (_, lat, lon) = triple
+            map.move(
+                CameraPosition(Point(lat, lon), 16f, 0f, 0f),
+                Animation(Animation.Type.SMOOTH, 0.55f),
+                null
+            )
+            selectedPlace = triple.first
+            mapSheetExpanded = false
+            suppressAutoFitAllPins = true
+            placeVm.obtainEvent(PlaceIntent.ConsumeMapFocusRequest)
+            return@LaunchedEffect
+        }
+        if (!placeState.isLoading && mapPlaces.none { it.id == id }) {
+            placeVm.obtainEvent(PlaceIntent.ConsumeMapFocusRequest)
+        }
+    }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            placeVm.obtainEvent(PlaceIntent.ConsumeMapFocusRequest)
+        }
     }
 
     LaunchedEffect(mapView, userLatLng, placesWithPins) {
@@ -445,6 +485,16 @@ fun PlaceMapTab(placeVm: PlaceViewModel) {
                 onExpandDetail = { mapSheetExpanded = true },
                 onCollapseDetail = { mapSheetExpanded = false },
                 userLatLng = userLatLng,
+                placeVm = placeVm,
+                onRecenterMap = {
+                    mapPinLatLng?.let { (la, lo) ->
+                        mapView.mapWindow.map.move(
+                            CameraPosition(Point(la, lo), 17f, 0f, 0f),
+                            Animation(Animation.Type.SMOOTH, 0.45f),
+                            null
+                        )
+                    }
+                },
                 onDismiss = {
                     selectedPlace = null
                     mapSheetExpanded = false
@@ -467,6 +517,8 @@ private fun MapPlaceInfoSheet(
     onExpandDetail: () -> Unit,
     onCollapseDetail: () -> Unit,
     userLatLng: Pair<Double, Double>?,
+    placeVm: PlaceViewModel,
+    onRecenterMap: () -> Unit,
     onDismiss: () -> Unit,
     onBook: () -> Unit
 ) {
@@ -504,14 +556,12 @@ private fun MapPlaceInfoSheet(
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis
             )
-            place.categoryName?.takeIf { it.isNotBlank() }?.let { cat ->
-                Text(
-                    cat,
-                    style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.padding(top = 4.dp)
-                )
-            }
+            Text(
+                place.displayVenueTypeRu(),
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.padding(top = 4.dp)
+            )
             Spacer(Modifier.height(12.dp))
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
             Spacer(Modifier.height(12.dp))
@@ -531,6 +581,16 @@ private fun MapPlaceInfoSheet(
                 lineHeight = 20.sp
             )
             Spacer(Modifier.height(8.dp))
+            val collapsedAddress = listOfNotNull(
+                place.city?.takeIf { it.isNotBlank() },
+                place.address?.takeIf { it.isNotBlank() }
+            )
+                .joinToString(", ")
+                .ifBlank {
+                    if (mapPinLatLng != null) "Показать на карте"
+                    else "Адрес не указан"
+                }
+            val addressClickable = mapPinLatLng != null
             Row(verticalAlignment = Alignment.Top) {
                 Icon(
                     Icons.Filled.LocationOn,
@@ -542,16 +602,18 @@ private fun MapPlaceInfoSheet(
                 )
                 Spacer(Modifier.width(8.dp))
                 Text(
-                    listOfNotNull(
-                        place.city?.takeIf { it.isNotBlank() },
-                        place.address?.takeIf { it.isNotBlank() }
-                    )
-                        .joinToString(", ")
-                        .ifBlank { "Адрес не указан" },
+                    collapsedAddress,
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = if (addressClickable) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
                     maxLines = 2,
-                    overflow = TextOverflow.Ellipsis
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.then(
+                        if (addressClickable) Modifier.clickable(onClick = onRecenterMap) else Modifier
+                    )
                 )
             }
             if (!approved) {
@@ -568,6 +630,18 @@ private fun MapPlaceInfoSheet(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Text("Подробнее: фото и полное описание")
+            }
+            if (approved) {
+                Spacer(Modifier.height(12.dp))
+                OutlinedButton(
+                    modifier = Modifier.fillMaxWidth(),
+                    onClick = {
+                        placeVm.obtainEvent(PlaceIntent.OpenPlaceReviews(place.id))
+                        onDismiss()
+                    }
+                ) {
+                    Text("Отзывы")
+                }
             }
             Spacer(Modifier.height(16.dp))
             Row(
@@ -590,7 +664,12 @@ private fun MapPlaceInfoSheet(
             }
             Spacer(Modifier.height(8.dp))
             Column(Modifier.verticalScroll(rememberScrollState())) {
-                PlaceVenueFullDetailContent(place = place)
+                PlaceVenueFullDetailContent(
+                    place = place,
+                    onOpenInAppMap = mapPinLatLng?.let {
+                        { onRecenterMap() }
+                    }
+                )
                 if (!approved) {
                     Spacer(Modifier.height(12.dp))
                     Text(
@@ -598,6 +677,18 @@ private fun MapPlaceInfoSheet(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.error
                     )
+                }
+            }
+            if (approved) {
+                Spacer(Modifier.height(12.dp))
+                OutlinedButton(
+                    modifier = Modifier.fillMaxWidth(),
+                    onClick = {
+                        placeVm.obtainEvent(PlaceIntent.OpenPlaceReviews(place.id))
+                        onDismiss()
+                    }
+                ) {
+                    Text("Отзывы")
                 }
             }
             Spacer(Modifier.height(16.dp))

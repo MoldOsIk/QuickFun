@@ -3,6 +3,7 @@ package com.app.quickfun.ui.place
 import android.app.Application
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
+import com.app.quickfun.data.local.MyPlacesModerationStatusStore
 import com.app.quickfun.di.AppModule
 
 class PlaceViewModelFactory(
@@ -15,6 +16,7 @@ class PlaceViewModelFactory(
         }
         return PlaceViewModel(
             application = application,
+            myPlacesModerationStatusStore = MyPlacesModerationStatusStore(application.applicationContext),
             placeRepository = AppModule.placeRepository(),
             getPlacesUseCase = AppModule.getPlacesUseCase,
             getMyPlacesUseCase = AppModule.getMyPlacesUseCase,
@@ -27,10 +29,21 @@ class PlaceViewModelFactory(
             createWeekTimeSlotsUseCase = AppModule.createWeekTimeSlotsUseCase,
             loadOwnerBookingScheduleUseCase = AppModule.loadOwnerBookingScheduleUseCase,
             loadVenueBookingsUseCase = AppModule.loadVenueBookingsUseCase,
+            cancelBookingUseCase = AppModule.cancelBookingUseCase,
             addSeatUseCase = AppModule.addSeatUseCase,
             generateVenueSeatLayoutUseCase = AppModule.generateVenueSeatLayoutUseCase,
             listSeatsUseCase = AppModule.listSeatsUseCase,
-            addCinemaSessionUseCase = AppModule.addCinemaSessionUseCase
+            saveCinemaSeatLayoutUseCase = AppModule.saveCinemaSeatLayoutUseCase,
+            addCinemaSessionUseCase = AppModule.addCinemaSessionUseCase,
+            updateCinemaSessionUseCase = AppModule.updateCinemaSessionUseCase,
+            deleteCinemaSessionUseCase = AppModule.deleteCinemaSessionUseCase,
+            clearCinemaHallUseCase = AppModule.clearCinemaHallUseCase,
+            deleteVenueSeatUseCase = AppModule.deleteVenueSeatUseCase,
+            addCinemaSeatAtCellUseCase = AppModule.addCinemaSeatAtCellUseCase,
+            getVenueCategoriesUseCase = AppModule.getVenueCategoriesUseCase,
+            resubmitRejectedPlaceUseCase = AppModule.resubmitRejectedPlaceUseCase,
+            getPlaceReviewsUseCase = AppModule.getPlaceReviewsUseCase,
+            upsertPlaceReviewUseCase = AppModule.upsertPlaceReviewUseCase
         ) as T
     }
 }

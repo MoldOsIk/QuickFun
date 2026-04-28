@@ -46,7 +46,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import com.app.quickfun.di.AppModule
 import com.app.quickfun.domain.model.PlaceRegistrationDraft
+import com.app.quickfun.domain.model.VenueCategory
 import com.app.quickfun.ui.auth.model.AuthEffect
 import com.app.quickfun.ui.auth.model.AuthIntent
 import com.app.quickfun.ui.auth.model.AuthState
@@ -54,7 +56,12 @@ import com.app.quickfun.ui.auth.model.RegistrationMode
 import com.app.quickfun.ui.place.VenueFormFields
 import com.app.quickfun.ui.place.parseOptionalLatLonStrings
 import com.app.quickfun.ui.place.venueFormCoordsAndAddressError
+import com.app.quickfun.ui.common.DialCountry
+import com.app.quickfun.ui.common.PhoneE164Field
+import com.app.quickfun.ui.common.dialCountryByIso
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 private enum class AuthEntryRoute {
     Login,
@@ -74,8 +81,13 @@ fun AuthScreen(vm: AuthViewModel) {
     var vAddress by remember { mutableStateOf("") }
     var vLat by remember { mutableStateOf("") }
     var vLng by remember { mutableStateOf("") }
-    var vCat by remember { mutableStateOf("") }
+    var vCategoryId by remember { mutableStateOf<Int?>(null) }
+    var venueCategories by remember { mutableStateOf<List<VenueCategory>>(emptyList()) }
+    var venueCategoriesLoading by remember { mutableStateOf(false) }
     var route by remember { mutableStateOf(AuthEntryRoute.Login) }
+    var regPhoneCountryIso by remember { mutableStateOf("RU") }
+    var regPhoneNational by remember { mutableStateOf("") }
+    var regPhoneE164Valid by remember { mutableStateOf<String?>(null) }
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
 
@@ -91,6 +103,21 @@ fun AuthScreen(vm: AuthViewModel) {
             when (effect) {
                 is AuthEffect.ShowMessage -> snackbarHostState.showSnackbar(effect.message)
             }
+        }
+    }
+
+    LaunchedEffect(state) {
+        if (state is AuthState.Authorized || state is AuthState.AwaitingEmailConfirmation) {
+            regPhoneNational = ""
+            regPhoneE164Valid = null
+            regPhoneCountryIso = "RU"
+        }
+        if (state is AuthState.Unauthorized && venueCategories.isEmpty() && !venueCategoriesLoading) {
+            venueCategoriesLoading = true
+            venueCategories = runCatching {
+                withContext(Dispatchers.IO) { AppModule.getVenueCategoriesUseCase() }
+            }.getOrElse { emptyList() }
+            venueCategoriesLoading = false
         }
     }
 
@@ -123,6 +150,11 @@ fun AuthScreen(vm: AuthViewModel) {
                             displayName = displayName,
                             registerAsPlaceOwner = registerAsPlaceOwner,
                             onRegisterAsPlaceOwnerChange = { registerAsPlaceOwner = it },
+                            regPhoneCountryIso = regPhoneCountryIso,
+                            onRegPhoneCountryIsoChange = { regPhoneCountryIso = it.iso },
+                            regPhoneNational = regPhoneNational,
+                            onRegPhoneNationalChange = { regPhoneNational = it },
+                            onRegPhoneE164ValidityChange = { regPhoneE164Valid = it },
                             vPlaceName = vPlaceName,
                             onVPlaceNameChange = { vPlaceName = it },
                             vDesc = vDesc,
@@ -135,8 +167,10 @@ fun AuthScreen(vm: AuthViewModel) {
                             onVLatChange = { vLat = it },
                             vLng = vLng,
                             onVLngChange = { vLng = it },
-                            vCat = vCat,
-                            onVCatChange = { vCat = it },
+                            vCategoryId = vCategoryId,
+                            onVCategoryIdChange = { vCategoryId = it },
+                            venueCategories = venueCategories,
+                            venueCategoriesLoading = venueCategoriesLoading,
                             onEmailChange = { email = it },
                             onPasswordChange = { password = it },
                             onDisplayNameChange = { displayName = it },
@@ -161,7 +195,7 @@ fun AuthScreen(vm: AuthViewModel) {
                                                 description = vDesc.trim().takeIf { it.isNotEmpty() },
                                                 city = city,
                                                 address = address,
-                                                categoryId = vCat.trim().toIntOrNull(),
+                                                categoryId = vCategoryId,
                                                 latitude = p.latitude,
                                                 longitude = p.longitude
                                             )
@@ -169,7 +203,15 @@ fun AuthScreen(vm: AuthViewModel) {
                                     } else {
                                         RegistrationMode.User
                                     }
-                                    vm.obtainEvent(AuthIntent.SignUp(email, password, displayName, mode))
+                                    vm.obtainEvent(
+                                        AuthIntent.SignUp(
+                                            email,
+                                            password,
+                                            displayName,
+                                            mode,
+                                            regPhoneE164Valid
+                                        )
+                                    )
                                 }
                             },
                             onGoToLogin = { route = AuthEntryRoute.Login }
@@ -267,6 +309,11 @@ private fun RegisterForm(
     displayName: String,
     registerAsPlaceOwner: Boolean,
     onRegisterAsPlaceOwnerChange: (Boolean) -> Unit,
+    regPhoneCountryIso: String,
+    onRegPhoneCountryIsoChange: (DialCountry) -> Unit,
+    regPhoneNational: String,
+    onRegPhoneNationalChange: (String) -> Unit,
+    onRegPhoneE164ValidityChange: (String?) -> Unit,
     vPlaceName: String,
     onVPlaceNameChange: (String) -> Unit,
     vDesc: String,
@@ -279,8 +326,10 @@ private fun RegisterForm(
     onVLatChange: (String) -> Unit,
     vLng: String,
     onVLngChange: (String) -> Unit,
-    vCat: String,
-    onVCatChange: (String) -> Unit,
+    vCategoryId: Int?,
+    onVCategoryIdChange: (Int?) -> Unit,
+    venueCategories: List<VenueCategory>,
+    venueCategoriesLoading: Boolean,
     onEmailChange: (String) -> Unit,
     onPasswordChange: (String) -> Unit,
     onDisplayNameChange: (String) -> Unit,
@@ -339,6 +388,17 @@ private fun RegisterForm(
                 singleLine = true
             )
             Spacer(modifier = Modifier.height(12.dp))
+            val regDialCountry = dialCountryByIso(regPhoneCountryIso)
+            PhoneE164Field(
+                selectedCountry = regDialCountry,
+                onCountryChange = onRegPhoneCountryIsoChange,
+                nationalDigits = regPhoneNational,
+                onNationalDigitsChange = onRegPhoneNationalChange,
+                onE164Change = onRegPhoneE164ValidityChange,
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("Телефон (необязательно)") }
+            )
+            Spacer(modifier = Modifier.height(12.dp))
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically
@@ -367,8 +427,10 @@ private fun RegisterForm(
                     onLatitudeChange = onVLatChange,
                     longitude = vLng,
                     onLongitudeChange = onVLngChange,
-                    categoryId = vCat,
-                    onCategoryIdChange = onVCatChange,
+                    venueCategories = venueCategories,
+                    selectedCategoryId = vCategoryId,
+                    onSelectedCategoryIdChange = onVCategoryIdChange,
+                    venueCategoriesLoading = venueCategoriesLoading,
                     modifier = Modifier.fillMaxWidth()
                 )
             }

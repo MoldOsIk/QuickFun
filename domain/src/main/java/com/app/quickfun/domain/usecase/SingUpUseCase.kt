@@ -9,7 +9,8 @@ class SignUpUseCase(
     suspend operator fun invoke(
         email: String,
         password: String,
-        displayName: String? = null
+        displayName: String? = null,
+        phoneE164: String? = null
     ): SignUpResult =
-        repository.signUp(email, password, displayName)
+        repository.signUp(email, password, displayName, phoneE164)
 }

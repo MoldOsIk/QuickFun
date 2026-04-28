@@ -14,7 +14,8 @@ sealed interface AuthIntent {
         val email: String,
         val password: String,
         val displayName: String,
-        val mode: RegistrationMode = RegistrationMode.User
+        val mode: RegistrationMode = RegistrationMode.User,
+        val phoneE164: String? = null
     ) : AuthIntent
     data object DismissEmailConfirmation : AuthIntent
     data object BackToUnauthorized : AuthIntent

@@ -15,6 +15,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -23,6 +24,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import com.app.quickfun.domain.model.Place
 import com.app.quickfun.ui.place.model.PlaceIntent
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -35,7 +37,7 @@ fun PlaceVenueDetailBottomSheet(
 ) {
     if (placeId == null) return
     val placeState by placeVm.state.collectAsState()
-    val place = placeState.places.find { it.id == placeId }
+    val place: Place? = placeState.places.find { it.id == placeId }
         ?: placeState.myPlaces.find { it.id == placeId }
     if (place == null) {
         LaunchedEffect(placeId) {
@@ -43,7 +45,10 @@ fun PlaceVenueDetailBottomSheet(
         }
         return
     }
-    val approved = place.status?.lowercase() == "approved"
+    val statusLower = place.status?.lowercase().orEmpty()
+    val approved = statusLower == "approved"
+    val rejected = statusLower == "rejected"
+    val rejectionText = place.rejectionReason?.trim()?.takeIf { it.isNotEmpty() }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -58,7 +63,17 @@ fun PlaceVenueDetailBottomSheet(
                 .padding(bottom = 20.dp)
                 .verticalScroll(rememberScrollState())
         ) {
-            PlaceVenueFullDetailContent(place = place)
+            PlaceVenueFullDetailContent(
+                place = place,
+                onOpenInAppMap = if (canFocusPlaceOnInAppMap(place)) {
+                    {
+                        placeVm.obtainEvent(PlaceIntent.FocusPlaceOnInAppMap(place.id))
+                        onDismiss()
+                    }
+                } else {
+                    null
+                }
+            )
             if (!approved) {
                 Spacer(Modifier.height(12.dp))
                 Text(
@@ -66,6 +81,24 @@ fun PlaceVenueDetailBottomSheet(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.error
                 )
+                if (rejected && rejectionText != null) {
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        text = "Причина отклонения: $rejectionText",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+            Spacer(Modifier.height(16.dp))
+            OutlinedButton(
+                onClick = {
+                    placeVm.obtainEvent(PlaceIntent.OpenPlaceReviews(place.id))
+                    onDismiss()
+                },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text("Отзывы")
             }
             Spacer(Modifier.height(20.dp))
             Row(

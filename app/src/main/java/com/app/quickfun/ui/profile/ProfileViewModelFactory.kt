@@ -9,6 +9,9 @@ class ProfileViewModelFactory : ViewModelProvider.Factory {
         return ProfileViewModel(
             AppModule.getProfileUseCase,
             AppModule.saveProfileNameUseCase,
+            AppModule.saveProfilePhoneUseCase,
+            AppModule.getMyActiveBookingsUseCase,
+            AppModule.cancelBookingUseCase,
             AppModule.registerPlaceAsOwnerUseCase
         ) as T
     }

@@ -18,6 +18,7 @@ data class PlaceDto(
     val owner_id: String? = null,
     val location_id: Int? = null,
     val category_id: Int? = null,
+    val rejection_reason: String? = null,
     val cover_image_url: String? = null,
     val place_gallery: List<PlaceGalleryRowDto>? = null,
     val categories: CategoryDto? = null,

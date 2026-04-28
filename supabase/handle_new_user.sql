@@ -8,14 +8,15 @@ security definer
 set search_path = public
 as $$
 begin
-  insert into public.users (id, name)
+  insert into public.users (id, name, phone_e164)
   values (
     new.id,
     coalesce(
       new.raw_user_meta_data->>'full_name',
       new.raw_user_meta_data->>'name',
       nullif(split_part(coalesce(new.email, ''), '@', 1), '')
-    )
+    ),
+    nullif(trim(coalesce(new.raw_user_meta_data->>'phone_e164', '')), '')
   )
   on conflict (id) do nothing;
   return new;

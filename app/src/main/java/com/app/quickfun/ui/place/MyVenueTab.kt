@@ -16,13 +16,13 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ElevatedCard
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -34,7 +34,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.app.quickfun.domain.model.Place
-import com.app.quickfun.ui.place.model.PlaceEffect
 import com.app.quickfun.ui.place.model.PlaceIntent
 import com.app.quickfun.ui.profile.model.ProfileState
 
@@ -61,14 +60,6 @@ fun MyVenueTab(
         val uid = profile.userId
         if (uid.isEmpty() || place.ownerId == null) return false
         return place.ownerId == uid
-    }
-
-    LaunchedEffect(placeVm) {
-        placeVm.effects.collect { effect ->
-            if (effect is PlaceEffect.ShowMessage) {
-                snackbarHostState.showSnackbar(effect.message)
-            }
-        }
     }
 
     when {
@@ -148,6 +139,30 @@ fun MyVenueTab(
                                             )
                                         }
                                     )
+                                    if (st == "rejected") {
+                                        val reason = place.rejectionReason?.trim()
+                                        if (!reason.isNullOrEmpty()) {
+                                            Text(
+                                                text = "Причина: $reason",
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                modifier = Modifier.padding(top = 8.dp)
+                                            )
+                                        }
+                                        if (canEdit(place)) {
+                                            FilledTonalButton(
+                                                onClick = {
+                                                    placeVm.obtainEvent(
+                                                        PlaceIntent.ResubmitRejectedPlace(place.id)
+                                                    )
+                                                },
+                                                enabled = !placeState.isLoadingMyPlaces,
+                                                modifier = Modifier.padding(top = 8.dp)
+                                            ) {
+                                                Text("Снова на модерацию")
+                                            }
+                                        }
+                                    }
                                 }
                                 Column(
                                     modifier = Modifier

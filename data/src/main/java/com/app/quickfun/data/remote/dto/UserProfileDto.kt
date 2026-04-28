@@ -7,6 +7,7 @@ import kotlinx.serialization.Serializable
 data class UserProfileRowDto(
     val id: String,
     val name: String? = null,
+    val phone_e164: String? = null,
     @SerialName("user_roles")
     val userRoles: List<UserRoleRowDto> = emptyList()
 )
@@ -22,7 +23,11 @@ data class RoleRowDto(
 )
 
 @Serializable
-data class UserUpsertDto(
-    val id: String,
+data class UserNameUpdateDto(
     val name: String? = null
+)
+
+@Serializable
+data class UserPhoneE164UpdateDto(
+    val phone_e164: String? = null
 )

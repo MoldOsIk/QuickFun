@@ -11,6 +11,7 @@ class AuthViewModelFactory : ViewModelProvider.Factory {
             AppModule.SignUpUseCase,
             AppModule.CheckAuthUseCase,
             AppModule.saveProfileNameUseCase,
+            AppModule.saveProfilePhoneUseCase,
             AppModule.registerPlaceAsOwnerUseCase,
             AppModule.signOutUseCase
         ) as T

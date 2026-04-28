@@ -11,4 +11,7 @@ data class Seat(
 ) {
     fun displayLabel(): String =
         label?.trim()?.takeIf { it.isNotEmpty() } ?: "Ряд $rowNumber, место $seatNumber"
+
+    /** Короткая подпись на схеме зала: «ряд.место». */
+    fun rowDotSeatLabel(): String = "$rowNumber.$seatNumber"
 }

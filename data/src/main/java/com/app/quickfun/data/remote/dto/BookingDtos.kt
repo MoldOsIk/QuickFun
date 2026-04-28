@@ -65,7 +65,8 @@ data class BookingSeatJoinDto(
 @Serializable
 data class UserIdNameRowDto(
     val id: String,
-    val name: String? = null
+    val name: String? = null,
+    val phone_e164: String? = null
 )
 
 @Serializable
@@ -102,4 +103,46 @@ data class SeatInsertDto(
 data class SeatLayoutPatchDto(
     val layout_x: Int,
     val layout_y: Int
+)
+
+@Serializable
+data class TimeSlotUpdateDto(
+    val start_time: String,
+    val end_time: String,
+    val label: String? = null
+)
+
+@Serializable
+data class OwnerDeleteSeatRpcParams(val p_seat_id: Int)
+
+@Serializable
+data class ClearPlaceSeatsRpcParams(val p_place_id: String)
+
+@Serializable
+data class OwnerDeleteTimeSlotRpcParams(val p_slot_id: Int)
+
+@Serializable
+data class CancelBookingRpcParams(
+    val p_booking_id: Int
+)
+
+@Serializable
+data class PlaceNameJoinDto(
+    val name: String? = null
+)
+
+@Serializable
+data class MyBookingTimeSlotJoinDto(
+    val place_id: String,
+    val start_time: String,
+    val end_time: String,
+    val places: PlaceNameJoinDto? = null
+)
+
+@Serializable
+data class MyActiveBookingRowDto(
+    val id: Int,
+    val status: String,
+    val time_slots: MyBookingTimeSlotJoinDto,
+    val seats: BookingSeatJoinDto
 )

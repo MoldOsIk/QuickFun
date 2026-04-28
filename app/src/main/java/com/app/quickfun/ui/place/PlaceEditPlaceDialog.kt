@@ -46,7 +46,7 @@ fun PlaceEditPlaceDialog(
     var editDescription by remember { mutableStateOf("") }
     var editCity by remember { mutableStateOf("") }
     var editAddress by remember { mutableStateOf("") }
-    var editCategoryId by remember { mutableStateOf("") }
+    var editSelectedCategoryId by remember { mutableStateOf<Int?>(null) }
     var editLatitude by remember { mutableStateOf("") }
     var editLongitude by remember { mutableStateOf("") }
 
@@ -88,9 +88,10 @@ fun PlaceEditPlaceDialog(
         editDescription = p.description.orEmpty()
         editCity = p.city.orEmpty()
         editAddress = p.address.orEmpty()
-        editCategoryId = p.categoryId?.toString().orEmpty()
+        editSelectedCategoryId = p.categoryId
         editLatitude = p.latitude?.let { formatCoord(it) }.orEmpty()
         editLongitude = p.longitude?.let { formatCoord(it) }.orEmpty()
+        placeVm.obtainEvent(PlaceIntent.LoadVenueCategories)
     }
 
     val editing = editTarget
@@ -188,15 +189,15 @@ fun PlaceEditPlaceDialog(
                     enabled = !placeState.isEditingPlace,
                     placeholder = { Text("37.6173") }
                 )
-                OutlinedTextField(
-                    value = editCategoryId,
-                    onValueChange = { editCategoryId = it.filter { ch -> ch.isDigit() } },
-                    label = { Text("ID категории (необяз.)") },
+                VenueCategoryDropdown(
+                    categories = placeState.venueCategories,
+                    selectedCategoryId = editSelectedCategoryId,
+                    onSelectedCategoryIdChange = { editSelectedCategoryId = it },
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(top = 8.dp),
-                    singleLine = true,
-                    enabled = !placeState.isEditingPlace
+                    enabled = !placeState.isEditingPlace,
+                    isLoading = placeState.isLoadingVenueCategories
                 )
             }
         },
@@ -212,7 +213,7 @@ fun PlaceEditPlaceDialog(
                     }
                     val p = parseOptionalLatLonStrings(editLatitude, editLongitude)
                     val locId = editing.locationId ?: return@Button
-                    val cat = editCategoryId.trim().toIntOrNull()
+                    val cat = editSelectedCategoryId
                     val latestCover = placeState.places.find { it.id == editing.id }
                         ?: placeState.myPlaces.find { it.id == editing.id }
                         ?: editing

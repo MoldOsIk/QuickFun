@@ -1,7 +1,11 @@
 package com.app.quickfun.ui.place
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -10,16 +14,19 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
-import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -34,8 +41,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.app.quickfun.domain.model.BookableSlot
 import com.app.quickfun.domain.model.Seat
 import com.app.quickfun.domain.model.VenueKind
@@ -283,6 +293,12 @@ private fun ResourceBookingContent(
     }
 }
 
+private enum class CinemaBookStep {
+    Film,
+    Time,
+    Seat
+}
+
 @Composable
 private fun CinemaBookingContent(
     slots: List<BookableSlot>,
@@ -290,114 +306,168 @@ private fun CinemaBookingContent(
     submitting: Boolean,
     onBook: (timeSlotId: Int, seatId: Int) -> Unit
 ) {
-    var selectedSessionId by remember(slots) { mutableIntStateOf(-1) }
+    var step by remember(slots) { mutableStateOf(CinemaBookStep.Film) }
+    var selectedFilmTitle by remember(slots) { mutableStateOf<String?>(null) }
+    var selectedTimeSlotId by remember(slots) { mutableIntStateOf(-1) }
 
-    val sessions = remember(slots) {
+    val distinctSessions = remember(slots) {
         slots.distinctBy { it.timeSlotId }.sortedBy { it.startTimeIso }
     }
+    val sessionsByFilm = remember(slots) {
+        distinctSessions.groupBy { s ->
+            s.sessionLabel?.trim()?.takeIf { it.isNotEmpty() } ?: "Сеанс"
+        }
+    }
 
-    if (selectedSessionId < 0) {
-        Text("Выберите сеанс", style = MaterialTheme.typography.titleSmall)
-        sessions.forEach { s ->
-            val timeLine = formatBookingSlotRange(s.startTimeIso, s.endTimeIso)
-            val title = s.displaySession(timeLine)
-            OutlinedButton(
-                onClick = { selectedSessionId = s.timeSlotId },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 4.dp),
-                enabled = !submitting
-            ) {
-                Column(Modifier.fillMaxWidth()) {
-                    Text(title, style = MaterialTheme.typography.bodyLarge)
-                    Text(timeLine, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    when (step) {
+        CinemaBookStep.Film -> {
+            Text("Выберите фильм", style = MaterialTheme.typography.titleSmall)
+            sessionsByFilm.keys.sorted().forEach { film ->
+                OutlinedButton(
+                    onClick = {
+                        selectedFilmTitle = film
+                        step = CinemaBookStep.Time
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 4.dp),
+                    enabled = !submitting
+                ) {
+                    Text(film, style = MaterialTheme.typography.bodyLarge)
                 }
             }
         }
-    } else {
-        val sessionSlots = remember(slots, selectedSessionId) {
-            slots.filter { it.timeSlotId == selectedSessionId }
-        }
-        val freeIds = remember(sessionSlots) { sessionSlots.map { it.seatId }.toSet() }
-        val timeLine = sessionSlots.firstOrNull()?.let { s ->
-            formatBookingSlotRange(s.startTimeIso, s.endTimeIso)
-        }.orEmpty()
-        val sessionTitle = sessionSlots.firstOrNull()
-            ?.displaySession(timeLine)
-            ?: timeLine
-
-        Text(sessionTitle, style = MaterialTheme.typography.titleSmall)
-        Text(timeLine, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        TextButton(onClick = { selectedSessionId = -1 }, enabled = !submitting) {
-            Text("← Другой сеанс")
-        }
-        Spacer(Modifier.height(8.dp))
-        Text(
-            "Экран",
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.primary,
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(bottom = 6.dp),
-            textAlign = TextAlign.Center
-        )
-
-        if (seats.isEmpty()) {
+        CinemaBookStep.Time -> {
+            val film = selectedFilmTitle ?: ""
+            val showings = sessionsByFilm[film].orEmpty()
+            TextButton(
+                onClick = {
+                    step = CinemaBookStep.Film
+                    selectedFilmTitle = null
+                },
+                enabled = !submitting
+            ) {
+                Text("← К фильмам")
+            }
+            Text(film, style = MaterialTheme.typography.titleSmall)
             Text(
-                "Нет данных о местах зала. Админ должен сгенерировать схему мест.",
+                "Выберите время сеанса",
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.error
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(bottom = 8.dp)
             )
-        } else {
-            val rows = remember(seats) { seats.groupBy { it.rowNumber }.toSortedMap() }
-            rows.forEach { (rowNum, rowSeats) ->
-                Text(
-                    "Ряд $rowNum",
-                    style = MaterialTheme.typography.labelSmall,
-                    modifier = Modifier.padding(top = 8.dp, bottom = 4.dp)
-                )
-                Row(
+            showings.forEach { s ->
+                val timeLine = formatBookingSlotRange(s.startTimeIso, s.endTimeIso)
+                OutlinedButton(
+                    onClick = {
+                        selectedTimeSlotId = s.timeSlotId
+                        step = CinemaBookStep.Seat
+                    },
                     modifier = Modifier
                         .fillMaxWidth()
-                        .horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                        .padding(vertical = 4.dp),
+                    enabled = !submitting
                 ) {
-                    rowSeats.sortedBy { it.seatNumber }.forEach { seat ->
-                        val free = seat.id in freeIds
-                        if (free) {
-                            FilledTonalButton(
-                                onClick = { onBook(selectedSessionId, seat.id) },
-                                enabled = !submitting,
-                                modifier = Modifier.width(44.dp)
-                            ) {
-                                Text(
-                                    "${seat.seatNumber}",
-                                    style = MaterialTheme.typography.labelMedium
-                                )
-                            }
-                        } else {
-                            OutlinedButton(
-                                onClick = {},
-                                enabled = false,
-                                modifier = Modifier.width(44.dp)
-                            ) {
-                                Text(
-                                    "${seat.seatNumber}",
-                                    style = MaterialTheme.typography.labelMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f)
-                                )
+                    Text(timeLine, style = MaterialTheme.typography.bodyLarge)
+                }
+            }
+        }
+        CinemaBookStep.Seat -> {
+            val sessionSlots = remember(slots, selectedTimeSlotId) {
+                slots.filter { it.timeSlotId == selectedTimeSlotId }
+            }
+            val freeIds = remember(sessionSlots) { sessionSlots.map { it.seatId }.toSet() }
+            val timeLine = sessionSlots.firstOrNull()?.let { s ->
+                formatBookingSlotRange(s.startTimeIso, s.endTimeIso)
+            }.orEmpty()
+            val filmTitle = selectedFilmTitle ?: ""
+
+            Text(filmTitle, style = MaterialTheme.typography.titleSmall)
+            Text(timeLine, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            TextButton(
+                onClick = {
+                    step = CinemaBookStep.Time
+                    selectedTimeSlotId = -1
+                },
+                enabled = !submitting
+            ) {
+                Text("← Другое время")
+            }
+            Spacer(Modifier.height(8.dp))
+            Text(
+                "Экран",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 6.dp),
+                textAlign = TextAlign.Center
+            )
+
+            if (seats.isEmpty()) {
+                Text(
+                    "Нет данных о местах зала. Админ должен сгенерировать схему мест.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error
+                )
+            } else {
+                val layoutKey = remember(seats) {
+                    seats.joinToString(",") { "${it.id}:${it.layoutX}:${it.layoutY}:${it.rowNumber}:${it.seatNumber}" }
+                }
+                val maxGy = remember(layoutKey) { seats.maxOf { it.effectiveGridY() } }
+                val maxGx = remember(layoutKey) { seats.maxOf { it.effectiveGridX() } }
+                val cell = CinemaBookingHallCellDp
+                val gap = CinemaBookingHallGapDp
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 320.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.22f))
+                        .padding(8.dp)
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState())
+                    ) {
+                        Column(
+                            modifier = Modifier.verticalScroll(rememberScrollState())
+                        ) {
+                            for (gy in 0..maxGy) {
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(gap),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.padding(vertical = 1.dp)
+                                ) {
+                                    for (gx in 0..maxGx) {
+                                        val seat = seats.find {
+                                            it.effectiveGridX() == gx && it.effectiveGridY() == gy
+                                        }
+                                        if (seat != null) {
+                                            val free = seat.id in freeIds
+                                            CinemaHallBookingSeatCell(
+                                                label = seat.rowDotSeatLabel(),
+                                                available = free,
+                                                submitting = submitting,
+                                                onClick = { onBook(selectedTimeSlotId, seat.id) }
+                                            )
+                                        } else {
+                                            Spacer(Modifier.size(cell))
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
                 }
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    "Светлые — свободны, тусклые — заняты. Нажмите на свободное место.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
-            Spacer(Modifier.height(8.dp))
-            Text(
-                "Серый недоступен. Нажмите на свободное место — бронь сразу отправится.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
         }
     }
 }
@@ -433,6 +503,69 @@ private fun BookableSlotRow(
         }
     }
 }
+
+private val CinemaBookingHallCellDp = 30.dp
+private val CinemaBookingHallGapDp = 2.dp
+
+@Composable
+private fun CinemaHallBookingSeatCell(
+    label: String,
+    available: Boolean,
+    submitting: Boolean,
+    onClick: () -> Unit
+) {
+    val shape = RoundedCornerShape(5.dp)
+    val cell = CinemaBookingHallCellDp
+    val mod = Modifier
+        .size(cell)
+        .clip(shape)
+    if (available) {
+        Box(
+            modifier = mod
+                .background(MaterialTheme.colorScheme.primaryContainer)
+                .border(
+                    width = 1.dp,
+                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.28f),
+                    shape = shape
+                )
+                .clickable(enabled = !submitting) { onClick() },
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = label,
+                fontSize = 10.sp,
+                lineHeight = 11.sp,
+                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+    } else {
+        Box(
+            modifier = mod
+                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                .border(
+                    width = 1.dp,
+                    color = MaterialTheme.colorScheme.outline.copy(alpha = 0.18f),
+                    shape = shape
+                ),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = label,
+                fontSize = 10.sp,
+                lineHeight = 11.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.42f),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+    }
+}
+
+private fun Seat.effectiveGridX(): Int = layoutX ?: (seatNumber - 1).coerceAtLeast(0)
+
+private fun Seat.effectiveGridY(): Int = layoutY ?: (rowNumber - 1).coerceAtLeast(0)
 
 private fun VenueKind.selectResourceChipLabel(): String =
     when (this) {

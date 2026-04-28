@@ -10,19 +10,26 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.app.quickfun.domain.model.Place
 import com.app.quickfun.ui.place.model.PlaceIntent
 
 @Composable
@@ -30,6 +37,69 @@ fun ModerationTab(
     placeVm: PlaceViewModel
 ) {
     val placeState by placeVm.state.collectAsState()
+    var rejectTarget by remember { mutableStateOf<Place?>(null) }
+    var rejectReasonDraft by remember { mutableStateOf("") }
+
+    rejectTarget?.let { target ->
+        AlertDialog(
+            onDismissRequest = {
+                if (!placeState.isModerating) {
+                    rejectTarget = null
+                    rejectReasonDraft = ""
+                }
+            },
+            title = { Text("Отклонить заявку") },
+            text = {
+                Column {
+                    Text(
+                        text = "«${target.name}». Укажите причину — владелец увидит её и сможет исправить заявку.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.padding(bottom = 12.dp)
+                    )
+                    OutlinedTextField(
+                        value = rejectReasonDraft,
+                        onValueChange = { rejectReasonDraft = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("Причина отклонения") },
+                        minLines = 3,
+                        singleLine = false,
+                        enabled = !placeState.isModerating
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val reason = rejectReasonDraft.trim()
+                        if (reason.isEmpty()) return@TextButton
+                        placeVm.obtainEvent(
+                            PlaceIntent.ApprovePlace(
+                                placeId = target.id,
+                                approved = false,
+                                rejectionReason = reason
+                            )
+                        )
+                        rejectTarget = null
+                        rejectReasonDraft = ""
+                    },
+                    enabled = !placeState.isModerating && rejectReasonDraft.trim().isNotEmpty()
+                ) {
+                    Text("Отклонить")
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = {
+                        rejectTarget = null
+                        rejectReasonDraft = ""
+                    },
+                    enabled = !placeState.isModerating
+                ) {
+                    Text("Отмена")
+                }
+            }
+        )
+    }
 
     when {
         placeState.isLoadingModeration && placeState.pendingPlaces.isEmpty() -> {
@@ -94,9 +164,8 @@ fun ModerationTab(
                                 }
                                 OutlinedButton(
                                     onClick = {
-                                        placeVm.obtainEvent(
-                                            PlaceIntent.ApprovePlace(place.id, approved = false)
-                                        )
+                                        rejectReasonDraft = ""
+                                        rejectTarget = place
                                     },
                                     enabled = !placeState.isModerating,
                                     modifier = Modifier.weight(1f)

@@ -5,24 +5,37 @@ import android.net.Uri
 import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.app.quickfun.data.local.MyPlacesModerationStatusStore
+import com.app.quickfun.domain.model.Place
 import com.app.quickfun.domain.model.VenueKind
 import com.app.quickfun.domain.model.resolveVenueKind
+import com.app.quickfun.domain.usecase.AddCinemaSeatAtCellUseCase
 import com.app.quickfun.domain.usecase.AddCinemaSessionUseCase
 import com.app.quickfun.domain.usecase.AddSeatUseCase
+import com.app.quickfun.domain.usecase.ClearCinemaHallUseCase
 import com.app.quickfun.domain.usecase.GenerateVenueSeatLayoutUseCase
 import com.app.quickfun.domain.usecase.ListSeatsUseCase
+import com.app.quickfun.domain.usecase.SaveCinemaSeatLayoutUseCase
 import com.app.quickfun.domain.usecase.ApprovePlaceUseCase
+import com.app.quickfun.domain.usecase.CancelBookingUseCase
 import com.app.quickfun.domain.usecase.CreateBookingUseCase
 import com.app.quickfun.domain.usecase.CreatePlaceUseCase
 import com.app.quickfun.domain.usecase.CreateWeekTimeSlotsUseCase
+import com.app.quickfun.domain.usecase.DeleteCinemaSessionUseCase
+import com.app.quickfun.domain.usecase.DeleteVenueSeatUseCase
 import com.app.quickfun.domain.usecase.GetAvailableBookableSlotsUseCase
 import com.app.quickfun.domain.usecase.GetMyPlacesUseCase
 import com.app.quickfun.domain.usecase.GetPendingPlacesUseCase
+import com.app.quickfun.domain.usecase.GetPlaceReviewsUseCase
 import com.app.quickfun.domain.usecase.GetPlacesUseCase
+import com.app.quickfun.domain.usecase.GetVenueCategoriesUseCase
+import com.app.quickfun.domain.usecase.ResubmitRejectedPlaceUseCase
 import com.app.quickfun.domain.usecase.LoadOwnerBookingScheduleUseCase
 import com.app.quickfun.domain.usecase.LoadVenueBookingsUseCase
 import com.app.quickfun.domain.repository.PlaceRepository
+import com.app.quickfun.domain.usecase.UpdateCinemaSessionUseCase
 import com.app.quickfun.domain.usecase.UpdatePlaceUseCase
+import com.app.quickfun.domain.usecase.UpsertPlaceReviewUseCase
 import com.app.quickfun.ui.place.model.PlaceEffect
 import com.app.quickfun.ui.place.model.PlaceIntent
 import com.app.quickfun.ui.place.model.PlaceState
@@ -43,6 +56,7 @@ import java.time.format.DateTimeFormatter
 
 class PlaceViewModel(
     application: Application,
+    private val myPlacesModerationStatusStore: MyPlacesModerationStatusStore,
     private val placeRepository: PlaceRepository,
     private val getPlacesUseCase: GetPlacesUseCase,
     private val getMyPlacesUseCase: GetMyPlacesUseCase,
@@ -55,10 +69,21 @@ class PlaceViewModel(
     private val createWeekTimeSlotsUseCase: CreateWeekTimeSlotsUseCase,
     private val loadOwnerBookingScheduleUseCase: LoadOwnerBookingScheduleUseCase,
     private val loadVenueBookingsUseCase: LoadVenueBookingsUseCase,
+    private val cancelBookingUseCase: CancelBookingUseCase,
     private val addSeatUseCase: AddSeatUseCase,
     private val generateVenueSeatLayoutUseCase: GenerateVenueSeatLayoutUseCase,
     private val listSeatsUseCase: ListSeatsUseCase,
-    private val addCinemaSessionUseCase: AddCinemaSessionUseCase
+    private val saveCinemaSeatLayoutUseCase: SaveCinemaSeatLayoutUseCase,
+    private val addCinemaSessionUseCase: AddCinemaSessionUseCase,
+    private val updateCinemaSessionUseCase: UpdateCinemaSessionUseCase,
+    private val deleteCinemaSessionUseCase: DeleteCinemaSessionUseCase,
+    private val clearCinemaHallUseCase: ClearCinemaHallUseCase,
+    private val deleteVenueSeatUseCase: DeleteVenueSeatUseCase,
+    private val addCinemaSeatAtCellUseCase: AddCinemaSeatAtCellUseCase,
+    private val getVenueCategoriesUseCase: GetVenueCategoriesUseCase,
+    private val resubmitRejectedPlaceUseCase: ResubmitRejectedPlaceUseCase,
+    private val getPlaceReviewsUseCase: GetPlaceReviewsUseCase,
+    private val upsertPlaceReviewUseCase: UpsertPlaceReviewUseCase
 ) : AndroidViewModel(application) {
 
     companion object {
@@ -68,7 +93,7 @@ class PlaceViewModel(
     private val _state = MutableStateFlow(PlaceState())
     val state: StateFlow<PlaceState> = _state
 
-    private val _effects = MutableSharedFlow<PlaceEffect>()
+    private val _effects = MutableSharedFlow<PlaceEffect>(extraBufferCapacity = 32)
     val effects: SharedFlow<PlaceEffect> = _effects.asSharedFlow()
 
     init {
@@ -80,7 +105,9 @@ class PlaceViewModel(
             PlaceIntent.Load -> viewModelScope.launch { reloadPlacesList() }
             PlaceIntent.LoadMyPlaces -> viewModelScope.launch { reloadMyPlaces() }
             PlaceIntent.LoadModeration -> viewModelScope.launch { reloadModeration() }
+            PlaceIntent.LoadVenueCategories -> loadVenueCategories()
             is PlaceIntent.ApprovePlace -> moderate(event)
+            is PlaceIntent.ResubmitRejectedPlace -> resubmitRejectedPlace(event.placeId)
             is PlaceIntent.AddPlace -> addPlace(event)
             is PlaceIntent.EditPlace -> editPlace(event)
             is PlaceIntent.UploadVenueCover -> uploadVenueCover(event)
@@ -104,21 +131,58 @@ class PlaceViewModel(
                     ownerTimeSlots = emptyList(),
                     isLoadingOwnerSchedule = false,
                     isGeneratingVenueLayout = false,
-                    isAddingCinemaSession = false
+                    isSavingSeatLayout = false,
+                    isAddingCinemaSession = false,
+                    isUpdatingCinemaSession = false,
+                    isDeletingCinemaSession = false,
+                    isClearingCinemaHall = false,
+                    isDeletingVenueSeat = false
                 )
             }
             is PlaceIntent.GenerateWeekSlots -> generateWeekSlots(event)
             is PlaceIntent.AddVenueSeat -> addVenueSeat(event)
             is PlaceIntent.GenerateVenueSeatLayout -> generateVenueSeatLayout(event)
+            is PlaceIntent.SaveCinemaSeatLayout -> saveCinemaSeatLayout(event)
             is PlaceIntent.AddCinemaSession -> addCinemaSession(event)
+            is PlaceIntent.UpdateCinemaSession -> updateCinemaSession(event)
+            is PlaceIntent.DeleteCinemaSession -> deleteCinemaSession(event)
+            is PlaceIntent.ClearCinemaHall -> clearCinemaHall(event)
+            is PlaceIntent.DeleteVenueSeat -> deleteVenueSeat(event)
+            is PlaceIntent.AddCinemaSeatAtCell -> addCinemaSeatAtCell(event)
             is PlaceIntent.OpenVenueBookings -> openVenueBookings(event.placeId)
             PlaceIntent.CloseVenueBookings -> {
                 _state.value = _state.value.copy(
                     venueBookingsPlace = null,
                     venueBookings = emptyList(),
                     isLoadingVenueBookings = false,
-                    venueBookingsError = null
+                    venueBookingsError = null,
+                    cancellingVenueBookingId = null
                 )
+            }
+            is PlaceIntent.CancelVenueBooking -> cancelVenueBooking(event.bookingId)
+            is PlaceIntent.FocusPlaceOnInAppMap -> {
+                _state.value = _state.value.copy(pendingMapFocusPlaceId = event.placeId)
+            }
+            PlaceIntent.ConsumeMapFocusRequest -> {
+                _state.value = _state.value.copy(pendingMapFocusPlaceId = null)
+            }
+            is PlaceIntent.OpenPlaceReviews -> openPlaceReviews(event.placeId)
+            PlaceIntent.ClosePlaceReviews -> closePlaceReviews()
+            is PlaceIntent.SubmitPlaceReview -> submitPlaceReview(event)
+        }
+    }
+
+    private fun loadVenueCategories() {
+        viewModelScope.launch {
+            if (_state.value.isLoadingVenueCategories) return@launch
+            _state.value = _state.value.copy(isLoadingVenueCategories = true)
+            try {
+                val list = withContext(Dispatchers.IO) { getVenueCategoriesUseCase() }
+                _state.value = _state.value.copy(venueCategories = list, isLoadingVenueCategories = false)
+            } catch (e: Exception) {
+                Log.e(TAG, "loadVenueCategories failed", e)
+                _state.value = _state.value.copy(isLoadingVenueCategories = false)
+                _effects.emit(PlaceEffect.ShowMessage("Не удалось загрузить категории."))
             }
         }
     }
@@ -181,7 +245,7 @@ class PlaceViewModel(
                 withContext(Dispatchers.IO) {
                     createBookingUseCase(intent.timeSlotId, intent.seatId)
                 }
-                _effects.emit(PlaceEffect.ShowMessage("Бронь создана."))
+                _effects.emit(PlaceEffect.ShowMessage("Бронь создана. Список активных броней — в профиле."))
                 _state.value = _state.value.copy(
                     bookingPlace = null,
                     bookableSlots = emptyList(),
@@ -240,6 +304,30 @@ class PlaceViewModel(
         }
     }
 
+    private fun cancelVenueBooking(bookingId: Int) {
+        viewModelScope.launch {
+            val place = _state.value.venueBookingsPlace ?: return@launch
+            _state.value = _state.value.copy(cancellingVenueBookingId = bookingId)
+            try {
+                withContext(Dispatchers.IO) { cancelBookingUseCase(bookingId) }
+                val list = withContext(Dispatchers.IO) { loadVenueBookingsUseCase(place.id) }
+                _state.value = _state.value.copy(
+                    venueBookings = list,
+                    cancellingVenueBookingId = null
+                )
+                _effects.emit(PlaceEffect.ShowMessage("Бронь отменена."))
+            } catch (e: Exception) {
+                Log.e(TAG, "cancelVenueBooking failed", e)
+                _state.value = _state.value.copy(cancellingVenueBookingId = null)
+                _effects.emit(
+                    PlaceEffect.ShowMessage(
+                        "Не удалось отменить бронь. Попробуйте снова или обновите список."
+                    )
+                )
+            }
+        }
+    }
+
     private fun openVenueBookings(placeId: String) {
         viewModelScope.launch {
             val place = _state.value.myPlaces.find { it.id == placeId }
@@ -252,6 +340,7 @@ class PlaceViewModel(
                 isLoadingVenueBookings = true,
                 venueBookings = emptyList(),
                 venueBookingsError = null,
+                cancellingVenueBookingId = null,
                 ownerSchedulePlace = null,
                 ownerSeats = emptyList(),
                 ownerTimeSlots = emptyList(),
@@ -277,6 +366,15 @@ class PlaceViewModel(
 
     private fun generateWeekSlots(intent: PlaceIntent.GenerateWeekSlots) {
         viewModelScope.launch {
+            val place = _state.value.myPlaces.find { it.id == intent.placeId }
+            if (place?.resolveVenueKind() == VenueKind.CINEMA) {
+                _effects.emit(
+                    PlaceEffect.ShowMessage(
+                        "Для кино недельная сетка не используется — добавляйте сеансы фильмов в блоке ниже."
+                    )
+                )
+                return@launch
+            }
             _state.value = _state.value.copy(isGeneratingSlots = true)
             try {
                 withContext(Dispatchers.IO) {
@@ -374,6 +472,124 @@ class PlaceViewModel(
         }
     }
 
+    private fun updateCinemaSession(intent: PlaceIntent.UpdateCinemaSession) {
+        viewModelScope.launch {
+            _state.value = _state.value.copy(isUpdatingCinemaSession = true)
+            try {
+                withContext(Dispatchers.IO) {
+                    updateCinemaSessionUseCase(
+                        placeId = intent.placeId,
+                        timeSlotId = intent.timeSlotId,
+                        filmTitle = intent.filmTitle,
+                        dateYmd = intent.dateYmd,
+                        startHour = intent.startHour,
+                        startMinute = intent.startMinute,
+                        endHour = intent.endHour,
+                        endMinute = intent.endMinute
+                    )
+                }
+                _effects.emit(PlaceEffect.ShowMessage("Сеанс обновлён."))
+                reloadOwnerIfOpen(intent.placeId)
+            } catch (e: Exception) {
+                Log.e(TAG, "updateCinemaSession failed", e)
+                _effects.emit(PlaceEffect.ShowMessage(e.message ?: "Не удалось обновить сеанс."))
+            } finally {
+                _state.value = _state.value.copy(isUpdatingCinemaSession = false)
+            }
+        }
+    }
+
+    private fun deleteCinemaSession(intent: PlaceIntent.DeleteCinemaSession) {
+        viewModelScope.launch {
+            _state.value = _state.value.copy(isDeletingCinemaSession = true)
+            try {
+                withContext(Dispatchers.IO) {
+                    deleteCinemaSessionUseCase(intent.timeSlotId)
+                }
+                _effects.emit(PlaceEffect.ShowMessage("Сеанс удалён."))
+                reloadOwnerIfOpen(intent.placeId)
+            } catch (e: Exception) {
+                Log.e(TAG, "deleteCinemaSession failed", e)
+                _effects.emit(PlaceEffect.ShowMessage(e.message ?: "Не удалось удалить сеанс."))
+            } finally {
+                _state.value = _state.value.copy(isDeletingCinemaSession = false)
+            }
+        }
+    }
+
+    private fun clearCinemaHall(intent: PlaceIntent.ClearCinemaHall) {
+        viewModelScope.launch {
+            _state.value = _state.value.copy(isClearingCinemaHall = true)
+            try {
+                withContext(Dispatchers.IO) {
+                    clearCinemaHallUseCase(intent.placeId)
+                }
+                _effects.emit(PlaceEffect.ShowMessage("Зал очищен: все места удалены из базы."))
+                reloadOwnerIfOpen(intent.placeId)
+            } catch (e: Exception) {
+                Log.e(TAG, "clearCinemaHall failed", e)
+                _effects.emit(PlaceEffect.ShowMessage(e.message ?: "Не удалось очистить зал."))
+            } finally {
+                _state.value = _state.value.copy(isClearingCinemaHall = false)
+            }
+        }
+    }
+
+    private fun deleteVenueSeat(intent: PlaceIntent.DeleteVenueSeat) {
+        viewModelScope.launch {
+            _state.value = _state.value.copy(isDeletingVenueSeat = true)
+            try {
+                withContext(Dispatchers.IO) {
+                    deleteVenueSeatUseCase(intent.seatId)
+                }
+                _effects.emit(PlaceEffect.ShowMessage("Место удалено."))
+                reloadOwnerIfOpen(intent.placeId)
+            } catch (e: Exception) {
+                Log.e(TAG, "deleteVenueSeat failed", e)
+                _effects.emit(PlaceEffect.ShowMessage(e.message ?: "Не удалось удалить место."))
+            } finally {
+                _state.value = _state.value.copy(isDeletingVenueSeat = false)
+            }
+        }
+    }
+
+    private fun addCinemaSeatAtCell(intent: PlaceIntent.AddCinemaSeatAtCell) {
+        viewModelScope.launch {
+            _state.value = _state.value.copy(isAddingSeat = true)
+            try {
+                withContext(Dispatchers.IO) {
+                    addCinemaSeatAtCellUseCase(
+                        intent.placeId,
+                        intent.rowNumber,
+                        intent.seatNumber,
+                        intent.layoutX,
+                        intent.layoutY
+                    )
+                }
+                _effects.emit(PlaceEffect.ShowMessage("Место добавлено."))
+                reloadOwnerIfOpen(intent.placeId)
+            } catch (e: IllegalArgumentException) {
+                _effects.emit(PlaceEffect.ShowMessage(e.message ?: "Проверьте ряд и номер."))
+            } catch (e: Exception) {
+                Log.e(TAG, "addCinemaSeatAtCell failed", e)
+                _effects.emit(PlaceEffect.ShowMessage(e.message ?: "Не удалось добавить место."))
+            } finally {
+                _state.value = _state.value.copy(isAddingSeat = false)
+            }
+        }
+    }
+
+    private suspend fun reloadOwnerIfOpen(placeId: String) {
+        if (_state.value.ownerSchedulePlace?.id != placeId) return
+        val data = withContext(Dispatchers.IO) {
+            loadOwnerBookingScheduleUseCase(placeId)
+        }
+        _state.value = _state.value.copy(
+            ownerSeats = data.seats,
+            ownerTimeSlots = data.timeSlots
+        )
+    }
+
     private fun generateVenueSeatLayout(intent: PlaceIntent.GenerateVenueSeatLayout) {
         viewModelScope.launch {
             _state.value = _state.value.copy(isGeneratingVenueLayout = true)
@@ -400,12 +616,47 @@ class PlaceViewModel(
         }
     }
 
+    private fun saveCinemaSeatLayout(intent: PlaceIntent.SaveCinemaSeatLayout) {
+        viewModelScope.launch {
+            _state.value = _state.value.copy(isSavingSeatLayout = true)
+            try {
+                withContext(Dispatchers.IO) {
+                    saveCinemaSeatLayoutUseCase(intent.placeId, intent.positions)
+                }
+                _effects.emit(PlaceEffect.ShowMessage("Схема зала сохранена."))
+                _effects.emit(PlaceEffect.CinemaSeatLayoutSaved)
+                val data = withContext(Dispatchers.IO) {
+                    loadOwnerBookingScheduleUseCase(intent.placeId)
+                }
+                _state.value = _state.value.copy(
+                    ownerSeats = data.seats,
+                    ownerTimeSlots = data.timeSlots,
+                    isSavingSeatLayout = false
+                )
+            } catch (e: IllegalArgumentException) {
+                Log.e(TAG, "saveCinemaSeatLayout validation", e)
+                _state.value = _state.value.copy(isSavingSeatLayout = false)
+                _effects.emit(PlaceEffect.ShowMessage(e.message ?: "Проверьте схему мест."))
+            } catch (e: Exception) {
+                Log.e(TAG, "saveCinemaSeatLayout failed", e)
+                _state.value = _state.value.copy(isSavingSeatLayout = false)
+                _effects.emit(
+                    PlaceEffect.ShowMessage(e.message ?: "Не удалось сохранить схему зала.")
+                )
+            }
+        }
+    }
+
     private fun moderate(intent: PlaceIntent.ApprovePlace) {
         viewModelScope.launch {
             _state.value = _state.value.copy(isModerating = true)
             try {
                 withContext(Dispatchers.IO) {
-                    approvePlaceUseCase(intent.placeId, intent.approved)
+                    approvePlaceUseCase(
+                        intent.placeId,
+                        intent.approved,
+                        intent.rejectionReason?.trim()?.takeIf { it.isNotEmpty() }
+                    )
                 }
                 _effects.emit(
                     PlaceEffect.ShowMessage(
@@ -628,12 +879,160 @@ class PlaceViewModel(
     private suspend fun reloadMyPlaces() {
         _state.value = _state.value.copy(isLoadingMyPlaces = true)
         try {
-            val list = withContext(Dispatchers.IO) { getMyPlacesUseCase() }
+            val (persisted, list) = withContext(Dispatchers.IO) {
+                val p = myPlacesModerationStatusStore.loadStatusByPlaceId()
+                val l = getMyPlacesUseCase()
+                p to l
+            }
+            val newlyApproved = mutableListOf<Place>()
+            val newlyRejected = mutableListOf<Place>()
+            for (p in list) {
+                val oldStatus = persisted[p.id] ?: continue
+                val ns = p.status?.lowercase()?.trim().orEmpty()
+                if (oldStatus == ns) continue
+                when (ns) {
+                    "approved" -> newlyApproved.add(p)
+                    "rejected" -> newlyRejected.add(p)
+                    else -> { /* pending и др. — без snackbar */ }
+                }
+            }
+            when {
+                newlyApproved.size == 1 -> {
+                    val p = newlyApproved[0]
+                    _effects.emit(
+                        PlaceEffect.ShowMessage(
+                            "Заведение «${p.name}» одобрено и доступно в каталоге."
+                        )
+                    )
+                }
+                newlyApproved.size > 1 -> {
+                    val names = newlyApproved.joinToString(", ") { "«${it.name}»" }
+                    _effects.emit(
+                        PlaceEffect.ShowMessage(
+                            "Одобрены заявки (${newlyApproved.size}): $names. Они доступны в каталоге."
+                        )
+                    )
+                }
+            }
+            when {
+                newlyRejected.size == 1 -> {
+                    val p = newlyRejected[0]
+                    val r = p.rejectionReason?.trim()?.takeIf { it.isNotEmpty() }
+                    val msg = if (r != null) {
+                        "Заявка «${p.name}» отклонена.\nПричина: $r"
+                    } else {
+                        "Заявка «${p.name}» отклонена."
+                    }
+                    _effects.emit(PlaceEffect.ShowMessage(msg))
+                }
+                newlyRejected.size > 1 -> {
+                    val body = newlyRejected.joinToString("\n") { p ->
+                        val r = p.rejectionReason?.trim()?.takeIf { it.isNotEmpty() }
+                        if (r != null) "«${p.name}»: $r" else "«${p.name}»"
+                    }
+                    _effects.emit(
+                        PlaceEffect.ShowMessage(
+                            "Отклонены заявки (${newlyRejected.size}):\n$body"
+                        )
+                    )
+                }
+            }
+            withContext(Dispatchers.IO) {
+                myPlacesModerationStatusStore.saveStatusByPlaceId(list)
+            }
             _state.value = _state.value.copy(myPlaces = list, isLoadingMyPlaces = false)
         } catch (e: Exception) {
             Log.e(TAG, "reloadMyPlaces failed", e)
             _state.value = _state.value.copy(isLoadingMyPlaces = false)
             _effects.emit(PlaceEffect.ShowMessage("Не удалось загрузить ваши заведения"))
+        }
+    }
+
+    private fun resubmitRejectedPlace(placeId: String) {
+        viewModelScope.launch {
+            try {
+                withContext(Dispatchers.IO) { resubmitRejectedPlaceUseCase(placeId) }
+                _effects.emit(PlaceEffect.ShowMessage("Заявка снова на модерации."))
+                reloadMyPlaces()
+                reloadModeration()
+                reloadPlacesList()
+            } catch (e: Exception) {
+                Log.e(TAG, "resubmitRejectedPlace failed", e)
+                _effects.emit(
+                    PlaceEffect.ShowMessage(
+                        "Не удалось отправить повторно. Проверьте, что заведение отклонено и вы владелец."
+                    )
+                )
+            }
+        }
+    }
+
+    private fun openPlaceReviews(placeId: String) {
+        viewModelScope.launch {
+            _state.value = _state.value.copy(
+                reviewsPlaceId = placeId,
+                placeReviews = emptyList(),
+                isLoadingPlaceReviews = true
+            )
+            try {
+                val list = withContext(Dispatchers.IO) { getPlaceReviewsUseCase(placeId) }
+                _state.value = _state.value.copy(
+                    placeReviews = list,
+                    isLoadingPlaceReviews = false
+                )
+            } catch (e: Exception) {
+                Log.e(TAG, "openPlaceReviews failed", e)
+                _state.value = _state.value.copy(
+                    reviewsPlaceId = null,
+                    placeReviews = emptyList(),
+                    isLoadingPlaceReviews = false
+                )
+                _effects.emit(PlaceEffect.ShowMessage("Не удалось загрузить отзывы."))
+            }
+        }
+    }
+
+    private fun closePlaceReviews() {
+        _state.value = _state.value.copy(
+            reviewsPlaceId = null,
+            placeReviews = emptyList(),
+            isLoadingPlaceReviews = false,
+            isSubmittingPlaceReview = false
+        )
+    }
+
+    private fun submitPlaceReview(event: PlaceIntent.SubmitPlaceReview) {
+        viewModelScope.launch {
+            val trimmed = event.body.trim()
+            if (trimmed.length < 3) {
+                _effects.emit(PlaceEffect.ShowMessage("Текст отзыва — не короче 3 символов."))
+                return@launch
+            }
+            if (event.rating !in 1..10) {
+                _effects.emit(PlaceEffect.ShowMessage("Оценка должна быть от 1 до 10."))
+                return@launch
+            }
+            _state.value = _state.value.copy(isSubmittingPlaceReview = true)
+            try {
+                withContext(Dispatchers.IO) {
+                    upsertPlaceReviewUseCase(event.placeId, event.rating, trimmed)
+                }
+                val list = withContext(Dispatchers.IO) { getPlaceReviewsUseCase(event.placeId) }
+                _state.value = _state.value.copy(
+                    placeReviews = list,
+                    isSubmittingPlaceReview = false
+                )
+                _effects.emit(PlaceEffect.ShowMessage("Отзыв сохранён."))
+            } catch (e: Exception) {
+                Log.e(TAG, "submitPlaceReview failed", e)
+                _state.value = _state.value.copy(isSubmittingPlaceReview = false)
+                _effects.emit(
+                    PlaceEffect.ShowMessage(
+                        "Не удалось сохранить отзыв. Войдите в аккаунт, " +
+                            "убедитесь, что заведение одобрено, и что вы не владелец этой площадки."
+                    )
+                )
+            }
         }
     }
 }

@@ -4,6 +4,8 @@ data class VenueBooking(
     val id: Int,
     val userId: String,
     val guestName: String?,
+    /** Телефон гостя (E.164), если указан в профиле. */
+    val guestPhoneE164: String? = null,
     val startTimeIso: String,
     val endTimeIso: String,
     val rowNumber: Int,

@@ -23,5 +23,22 @@ data class RegisterPlaceAsOwnerRpcParams(
 @Serializable
 data class ApprovePlaceRpcParams(
     val p_place_id: String,
-    val p_approved: Boolean
+    val p_approved: Boolean,
+    @EncodeDefault(ALWAYS)
+    val p_rejection_reason: String? = null
+)
+
+@Serializable
+data class ResubmitPlaceRpcParams(
+    val p_place_id: String
+)
+
+@Serializable
+data class CatalogPlaceCatalogScoreRow(
+    val place_id: String,
+    val booking_count: Long,
+    val review_count: Long,
+    val avg_rating: Double? = null,
+    val bayes_rating: Double,
+    val catalog_sort_score: Double
 )
